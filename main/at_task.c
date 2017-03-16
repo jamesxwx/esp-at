@@ -378,14 +378,14 @@ static uint8_t at_exeCmdTRY(uint8_t *cmd_name)
 
 static uint8_t at_queryCmdBleAddr(uint8_t * cmd_name)
 {
-	uint8_t * s;
+	char s[200];
 	const uint8_t * pAddr;
 	pAddr = esp_bt_dev_get_address();
 	if(!pAddr){
 		return ESP_AT_RESULT_CODE_FAIL;
 	}
     sprintf(s,"BLE public address : %02x:%02x:%02x:%02x:%02x:%02x\r\n",ESP_BD_ADDR_HEX(pAddr));
-    esp_at_port_write_data(s , strlen(s));
+    esp_at_port_write_data((uint8_t *)s , strlen(s));
 
     return ESP_AT_RESULT_CODE_OK;
 }
@@ -406,9 +406,9 @@ static esp_at_cmd_struct at_custom_cmd[] = {
     /*----------------------------------------------------------------------------*/
     {"+BLEADDR",NULL,at_queryCmdBleAddr,at_setupCmdBleAddr,NULL},
 //   {"+BLEANAME",NULL,NULL,NULL,NULL},
-//    {"+BLEINIT",NULL,NULL,NULL,NULL},
+//   {"+BLEINIT",NULL,NULL,NULL,NULL},
 //   {"+BLEADVPARAM",NULL,NULL,NULL,NULL},
-//    {"+BLEADVDATA",NULL,NULL,NULL,NULL},
+//   {"+BLEADVDATA",NULL,NULL,NULL,NULL},
 //   {"+BLEADV",NULL,NULL,NULL,NULL},
 };
 
