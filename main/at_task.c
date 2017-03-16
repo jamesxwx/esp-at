@@ -35,11 +35,14 @@
 #include "esp_system.h"
 #include "at_upgrade.h"
 
-/*
- * temp add
- * */
-#ifndef CONFIG_AT_BASE_ON_UART
-#define CONFIG_AT_BASE_ON_UART
+#include "esp_bt_device.h"
+#include "esp_gap_ble_api.h"
+#include "esp_bt_defs.h"
+
+#if 1
+    #ifndef CONFIG_AT_BASE_ON_UART
+    #define CONFIG_AT_BASE_ON_UART
+    #endif
 #endif
 
 #ifdef    CONFIG_AT_BASE_ON_UART
@@ -373,17 +376,24 @@ static uint8_t at_exeCmdTRY(uint8_t *cmd_name)
     return ESP_AT_RESULT_CODE_OK;
 }
 
-static uint8_t at_queryCmdBleAddr(uint8_t cmd_name)
+static uint8_t at_queryCmdBleAddr(uint8_t * cmd_name)
 {
-	uint8_t ret = ESP_AT_RESULT_CODE_ERROR;
+	uint8_t * s;
+	const uint8_t * pAddr;
+	pAddr = esp_bt_dev_get_address();
+	if(!pAddr){
+		return ESP_AT_RESULT_CODE_FAIL;
+	}
+    sprintf(s,"BLE public address : %02x:%02x:%02x:%02x:%02x:%02x\r\n",ESP_BD_ADDR_HEX(pAddr));
+    esp_at_port_write_data(s , strlen(s));
 
-	return ret;
+    return ESP_AT_RESULT_CODE_OK;
 }
-static uint8_t at_setupCmdBleAddr(uint8_t para_num)
+static uint8_t at_setupCmdBleAddr(uint8_t  para_num)
 {
-	uint8_t ret = ESP_AT_RESULT_CODE_ERROR;
-	return  ret;
+	return  ESP_AT_RESULT_CODE_OK;
 }
+
 /*------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/
 static esp_at_cmd_struct at_custom_cmd[] = {
     {"+UART", NULL, NULL, at_setupCmdUart, NULL},
