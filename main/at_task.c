@@ -34,7 +34,15 @@
 
 #include "esp_system.h"
 #include "at_upgrade.h"
-#ifdef CONFIG_AT_BASE_ON_UART
+
+/*
+ * temp add
+ * */
+#ifndef CONFIG_AT_BASE_ON_UART
+#define CONFIG_AT_BASE_ON_UART
+#endif
+
+#ifdef    CONFIG_AT_BASE_ON_UART
 #include "driver/uart.h"
 typedef struct {
     int32_t baudrate;
@@ -358,13 +366,40 @@ static uint8_t at_exeCmdCipupdate(uint8_t *cmd_name)//add get station ip and ap 
 
     return ESP_AT_RESULT_CODE_ERROR;
 }
+/*------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/
+static uint8_t at_exeCmdTRY(uint8_t *cmd_name)
+{
+    esp_at_port_write_data((uint8_t *)"haha just so so\r\n",strlen("haha just so so\r\n"));
+    return ESP_AT_RESULT_CODE_OK;
+}
 
+static uint8_t at_queryCmdBleAddr(uint8_t cmd_name)
+{
+	uint8_t ret = ESP_AT_RESULT_CODE_ERROR;
 
+	return ret;
+}
+static uint8_t at_setupCmdBleAddr(uint8_t para_num)
+{
+	uint8_t ret = ESP_AT_RESULT_CODE_ERROR;
+	return  ret;
+}
+/*------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/
 static esp_at_cmd_struct at_custom_cmd[] = {
     {"+UART", NULL, NULL, at_setupCmdUart, NULL},
     {"+UART_CUR", NULL, NULL, at_setupCmdUart, NULL},
     {"+UART_DEF", NULL, NULL, at_setupCmdUartDef, NULL},
     {"+CIUPDATE", NULL, NULL, NULL, at_exeCmdCipupdate},
+
+    /*add for try*/
+    {"+XWXTRY", NULL, NULL, NULL, at_exeCmdTRY},
+    /*----------------------------------------------------------------------------*/
+    {"+BLEADDR",NULL,at_queryCmdBleAddr,at_setupCmdBleAddr,NULL},
+//   {"+BLEANAME",NULL,NULL,NULL,NULL},
+//    {"+BLEINIT",NULL,NULL,NULL,NULL},
+//   {"+BLEADVPARAM",NULL,NULL,NULL,NULL},
+//    {"+BLEADVDATA",NULL,NULL,NULL,NULL},
+//   {"+BLEADV",NULL,NULL,NULL,NULL},
 };
 
 void at_status_callback (esp_at_status_type status)
