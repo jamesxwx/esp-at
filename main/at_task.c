@@ -35,6 +35,8 @@
 #include "esp_system.h"
 #include "at_upgrade.h"
 
+/*-------------------------------------------------------------------------*/
+
 #include "esp_bt_device.h"
 #include "esp_gap_ble_api.h"
 #include "esp_bt_defs.h"
@@ -44,6 +46,12 @@
     #define CONFIG_AT_BASE_ON_UART
     #endif
 #endif
+
+#define BUFFER_DEPTH 50
+
+static char ble_device_name[BUFFER_DEPTH] = "";
+
+/*-------------------------------------------------------------------------*/
 
 #ifdef    CONFIG_AT_BASE_ON_UART
 #include "driver/uart.h"
@@ -406,11 +414,36 @@ static uint8_t at_setupCmdBleAddr(uint8_t  para_num)
 		}
 		rand_addr[cnt] = (uint8_t)value;
 	}
-	if(ESP_OK != esp_ble_gap_set_rand_addr(rand_addr))
+	if(esp_ble_gap_set_rand_addr(rand_addr) != ESP_OK)
 		return ESP_AT_RESULT_CODE_ERROR;
 	return ESP_AT_RESULT_CODE_OK;
 }
 
+static uint8_t at_queryCmdBleName(uint8_t * cmd_name)
+{
+	if(strlen(ble_device_name)== 0){
+		esp_at_port_write_data((uint8_t *)"Device Name is NULL\r\n",strlen("Device Name is NULL\r\n"));
+		return ESP_AT_RESULT_CODE_OK;
+	}
+	esp_at_port_write_data((uint8_t *)ble_device_name,strlen(ble_device_name));
+	return ESP_AT_RESULT_CODE_OK;
+}
+
+static uint8_t at_setupCmdBleName(uint8_t para_num)
+{
+	int32_t cnt = 0;
+
+	if(para_num != 1){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	if(esp_at_get_para_as_str(cnt,(uint8_t **)(&ble_device_name)) != ESP_AT_PARA_PARSE_RESULT_OK){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	if(esp_ble_gap_set_device_name(ble_device_name) != ESP_OK )
+		return ESP_AT_RESULT_CODE_ERROR;
+	
+	return ESP_AT_RESULT_CODE_OK;
+}
 /*------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/
 static esp_at_cmd_struct at_custom_cmd[] = {
     {"+UART", NULL, NULL, at_setupCmdUart, NULL},
@@ -422,7 +455,7 @@ static esp_at_cmd_struct at_custom_cmd[] = {
     {"+XWXTRY", NULL, NULL, NULL, at_exeCmdTRY},
     /*----------------------------------------------------------------------------*/
     {"+BLEADDR",NULL,at_queryCmdBleAddr,at_setupCmdBleAddr,NULL},
-//   {"+BLEANAME",NULL,NULL,NULL,NULL},
+    {"+BLEANAME",NULL,at_queryCmdBleName,at_setupCmdBleName,NULL},
 //   {"+BLEINIT",NULL,NULL,NULL,NULL},
 //   {"+BLEADVPARAM",NULL,NULL,NULL,NULL},
 //   {"+BLEADVDATA",NULL,NULL,NULL,NULL},
