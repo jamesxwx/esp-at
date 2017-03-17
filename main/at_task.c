@@ -36,7 +36,7 @@
 #include "at_upgrade.h"
 
 /*-------------------------------------------------------------------------*/
-
+#include "bt.h"
 #include "esp_bt_device.h"
 #include "esp_gap_ble_api.h"
 #include "esp_bt_defs.h"
@@ -444,6 +444,14 @@ static uint8_t at_setupCmdBleName(uint8_t para_num)
 	
 	return ESP_AT_RESULT_CODE_OK;
 }
+
+static uint8_t at_exeCmdBleInit(uint8_t *cmd_name)
+{
+	esp_bt_controller_init();
+	if(esp_bt_controller_enable(ESP_BT_MODE_BTDM) == ESP_OK)
+		return ESP_AT_RESULT_CODE_FAIL;
+	return ESP_AT_RESULT_CODE_OK;
+}
 /*------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/
 static esp_at_cmd_struct at_custom_cmd[] = {
     {"+UART", NULL, NULL, at_setupCmdUart, NULL},
@@ -456,7 +464,7 @@ static esp_at_cmd_struct at_custom_cmd[] = {
     /*----------------------------------------------------------------------------*/
     {"+BLEADDR",NULL,at_queryCmdBleAddr,at_setupCmdBleAddr,NULL},
     {"+BLEANAME",NULL,at_queryCmdBleName,at_setupCmdBleName,NULL},
-//   {"+BLEINIT",NULL,NULL,NULL,NULL},
+    {"+BLEINIT",NULL,NULL,NULL,at_exeCmdBleInit},
 //   {"+BLEADVPARAM",NULL,NULL,NULL,NULL},
 //   {"+BLEADVDATA",NULL,NULL,NULL,NULL},
 //   {"+BLEADV",NULL,NULL,NULL,NULL},
