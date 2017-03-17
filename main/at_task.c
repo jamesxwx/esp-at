@@ -39,7 +39,7 @@
 #include "esp_gap_ble_api.h"
 #include "esp_bt_defs.h"
 
-#if 1
+#if 0
     #ifndef CONFIG_AT_BASE_ON_UART
     #define CONFIG_AT_BASE_ON_UART
     #endif
@@ -391,7 +391,24 @@ static uint8_t at_queryCmdBleAddr(uint8_t * cmd_name)
 }
 static uint8_t at_setupCmdBleAddr(uint8_t  para_num)
 {
-	return  ESP_AT_RESULT_CODE_OK;
+	int32_t cnt = 0 , value = 0;
+	esp_bd_addr_t rand_addr;
+	
+	if(para_num != 6){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	for(cnt=0;cnt<6;cnt++){
+		if(esp_at_get_para_as_digit(cnt,&value) != ESP_AT_PARA_PARSE_RESULT_OK){
+			return ESP_AT_RESULT_CODE_ERROR;
+		}
+		if((value < 0)||(value > 0xff)){
+			return ESP_AT_RESULT_CODE_ERROR;
+		}
+		rand_addr[cnt] = (uint8_t)value;
+	}
+	if(ESP_OK != esp_ble_gap_set_rand_addr(rand_addr))
+		return ESP_AT_RESULT_CODE_ERROR;
+	return ESP_AT_RESULT_CODE_OK;
 }
 
 /*------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/
