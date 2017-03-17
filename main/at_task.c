@@ -51,6 +51,14 @@
 
 static char ble_device_name[BUFFER_DEPTH] = "";
 
+static esp_ble_adv_params_t at_adv_params = {
+	.adv_int_min       =  0x20 ,
+	.adv_int_max       =  0x40 ,
+	.adv_type          =  ADV_TYPE_IND ,
+	.own_addr_type     =  BLE_ADDR_TYPE_PUBLIC ,
+	.channel_map       =  ADV_CHNL_ALL ,
+	.adv_filter_policy =  ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY ,
+};
 /*-------------------------------------------------------------------------*/
 
 #ifdef    CONFIG_AT_BASE_ON_UART
@@ -465,9 +473,13 @@ static esp_at_cmd_struct at_custom_cmd[] = {
     {"+BLEADDR",NULL,at_queryCmdBleAddr,at_setupCmdBleAddr,NULL},
     {"+BLEANAME",NULL,at_queryCmdBleName,at_setupCmdBleName,NULL},
     {"+BLEINIT",NULL,NULL,NULL,at_exeCmdBleInit},
-//   {"+BLEADVPARAM",NULL,NULL,NULL,NULL},
-//   {"+BLEADVDATA",NULL,NULL,NULL,NULL},
-//   {"+BLEADV",NULL,NULL,NULL,NULL},
+	
+	{"+BLEADVPARAM",NULL,NULL,NULL,NULL},
+    {"+BLEADVDATA",NULL,NULL,NULL,NULL},
+	{"+BLEADVSTART",NULL,NULL,NULL,NULL},
+	{"+BLEADVSTOP",NULL,NULL,NULL,NULL},
+	
+	
 };
 
 void at_status_callback (esp_at_status_type status)
