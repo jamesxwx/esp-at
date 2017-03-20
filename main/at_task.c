@@ -48,8 +48,20 @@
 #endif
 
 #define BUFFER_DEPTH 50
+#define ADV_DATA_LEN 31
+#define HCI_H4_CMD_PREAMBLE_SIZE           (4)
+#define HCI_GRP_BLE_CMDS                   (0x08 << 10)
+
+#define UINT16_TO_STREAM(p, u16) {*(p)++ = (uint8_t)(u16); *(p)++ = (uint8_t)((u16) >> 8);}
+#define UINT8_TO_STREAM(p, u8)   {*(p)++ = (uint8_t)(u8);}
+
+#define HCI_BLE_WRITE_ADV_DATA             (0x0008 | HCI_GRP_BLE_CMDS)
+#define HCIC_PARAM_SIZE_BLE_WRITE_ADV_DATA      (31)
+#define ARRAY_TO_STREAM(p, a, len) {int ijk; for (ijk = 0; ijk < len;        ijk++) *(p)++ = (uint8_t) a[ijk];}
 
 static char ble_device_name[BUFFER_DEPTH] = "";
+static uint8_t ble_adv_data[ADV_DATA_LEN] = {};
+static uint8_t hci_cmd_buf[128];
 
 static esp_ble_adv_params_t at_adv_params = {
 	.adv_int_min       =  0x20 ,
@@ -58,6 +70,13 @@ static esp_ble_adv_params_t at_adv_params = {
 	.own_addr_type     =  BLE_ADDR_TYPE_PUBLIC ,
 	.channel_map       =  ADV_CHNL_ALL ,
 	.adv_filter_policy =  ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY ,
+};
+
+enum {
+    H4_TYPE_COMMAND = 1,
+    H4_TYPE_ACL     = 2,
+    H4_TYPE_SCO     = 3,
+    H4_TYPE_EVENT   = 4
 };
 /*-------------------------------------------------------------------------*/
 
@@ -385,11 +404,55 @@ static uint8_t at_exeCmdCipupdate(uint8_t *cmd_name)//add get station ip and ap 
 
     return ESP_AT_RESULT_CODE_ERROR;
 }
-/*------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/
-static uint8_t at_exeCmdTRY(uint8_t *cmd_name)
+/*--------------------------------------------------------------------------------------------------------------------------------*/
+/*
+static uint16_t make_cmd_ble_set_adv_enable (uint8_t *buf, uint8_t adv_enable)
 {
-    esp_at_port_write_data((uint8_t *)"haha just so so\r\n",strlen("haha just so so\r\n"));
-    return ESP_AT_RESULT_CODE_OK;
+    UINT8_TO_STREAM (buf, H4_TYPE_COMMAND);
+    UINT16_TO_STREAM (buf, HCI_BLE_WRITE_ADV_ENABLE);
+    UINT8_TO_STREAM  (buf, HCIC_PARAM_SIZE_WRITE_ADV_ENABLE);
+    UINT8_TO_STREAM (buf, adv_enable);
+    return HCI_H4_CMD_PREAMBLE_SIZE + HCIC_PARAM_SIZE_WRITE_ADV_ENABLE;
+}
+
+static uint16_t make_cmd_ble_set_adv_param (uint8_t *buf, uint16_t adv_int_min, uint16_t adv_int_max,
+        uint8_t adv_type, uint8_t addr_type_own,
+        uint8_t addr_type_dir, bd_addr_t direct_bda,
+        uint8_t channel_map, uint8_t adv_filter_policy)
+{
+    UINT8_TO_STREAM (buf, H4_TYPE_COMMAND);
+    UINT16_TO_STREAM (buf, HCI_BLE_WRITE_ADV_PARAMS);
+    UINT8_TO_STREAM  (buf, HCIC_PARAM_SIZE_BLE_WRITE_ADV_PARAMS );
+
+    UINT16_TO_STREAM (buf, adv_int_min);
+    UINT16_TO_STREAM (buf, adv_int_max);
+    UINT8_TO_STREAM (buf, adv_type);
+    UINT8_TO_STREAM (buf, addr_type_own);
+    UINT8_TO_STREAM (buf, addr_type_dir);
+    BDADDR_TO_STREAM (buf, direct_bda);
+    UINT8_TO_STREAM (buf, channel_map);
+    UINT8_TO_STREAM (buf, adv_filter_policy);
+    return HCI_H4_CMD_PREAMBLE_SIZE + HCIC_PARAM_SIZE_BLE_WRITE_ADV_PARAMS;
+}
+*/
+static uint16_t make_cmd_ble_set_adv_data(uint8_t *buf, uint8_t data_len, uint8_t *p_data)
+{
+    UINT8_TO_STREAM (buf, H4_TYPE_COMMAND);
+    UINT16_TO_STREAM (buf, HCI_BLE_WRITE_ADV_DATA);
+    UINT8_TO_STREAM  (buf, HCIC_PARAM_SIZE_BLE_WRITE_ADV_DATA + 1);
+
+    memset(buf, 0, HCIC_PARAM_SIZE_BLE_WRITE_ADV_DATA);
+
+    if (p_data != NULL && data_len > 0) {
+        if (data_len > HCIC_PARAM_SIZE_BLE_WRITE_ADV_DATA) {
+            data_len = HCIC_PARAM_SIZE_BLE_WRITE_ADV_DATA;
+        }
+
+        UINT8_TO_STREAM (buf, data_len);
+
+        ARRAY_TO_STREAM (buf, p_data, data_len);
+    }
+    return HCI_H4_CMD_PREAMBLE_SIZE + HCIC_PARAM_SIZE_BLE_WRITE_ADV_DATA + 1;
 }
 
 static uint8_t at_queryCmdBleAddr(uint8_t * cmd_name)
@@ -460,24 +523,128 @@ static uint8_t at_exeCmdBleInit(uint8_t *cmd_name)
 		return ESP_AT_RESULT_CODE_FAIL;
 	return ESP_AT_RESULT_CODE_OK;
 }
-/*------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/
+
+static uint8_t at_queryCmdBleAdvParam(uint8_t *cmd_name)
+{
+	char s[BUFFER_DEPTH];
+	
+	memset(s,'\0',BUFFER_DEPTH);
+    sprintf(s,"adv int min : %02x\r\n",at_adv_params.adv_int_min);
+    esp_at_port_write_data((uint8_t *)s , strlen(s));
+		
+	memset(s,'\0',BUFFER_DEPTH);
+    sprintf(s,"adv int max : %02x\r\n",at_adv_params.adv_int_max);
+    esp_at_port_write_data((uint8_t *)s , strlen(s));	
+	
+	memset(s,'\0',BUFFER_DEPTH);
+    sprintf(s,"adv type : %02x\r\n",at_adv_params.adv_type);
+    esp_at_port_write_data((uint8_t *)s , strlen(s));	
+	
+	memset(s,'\0',BUFFER_DEPTH);
+    sprintf(s,"own addr type : %02x\r\n",at_adv_params.own_addr_type);
+    esp_at_port_write_data((uint8_t *)s , strlen(s));	
+	
+	memset(s,'\0',BUFFER_DEPTH);
+    sprintf(s,"channel map : %02x\r\n",at_adv_params.channel_map);
+    esp_at_port_write_data((uint8_t *)s , strlen(s));	
+	
+	memset(s,'\0',BUFFER_DEPTH);
+    sprintf(s,"adv filter policy : %02x\r\n",at_adv_params.adv_filter_policy);
+    esp_at_port_write_data((uint8_t *)s , strlen(s));	
+	
+	return ESP_AT_RESULT_CODE_OK;
+}
+
+static uint8_t at_setupCmdBleAdvParam(uint8_t para_num)
+{
+	int32_t cnt = 0 , value = 0;
+	
+	if(para_num != 6){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	
+	if(esp_at_get_para_as_digit(cnt++,&value) != ESP_AT_PARA_PARSE_RESULT_OK){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	at_adv_params.adv_int_min = value;
+	if(esp_at_get_para_as_digit(cnt++,&value) != ESP_AT_PARA_PARSE_RESULT_OK){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	at_adv_params.adv_int_max = value;
+	if(esp_at_get_para_as_digit(cnt++,&value) != ESP_AT_PARA_PARSE_RESULT_OK){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	at_adv_params.adv_type = value;
+	if(esp_at_get_para_as_digit(cnt++,&value) != ESP_AT_PARA_PARSE_RESULT_OK){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	at_adv_params.own_addr_type = value;
+	if(esp_at_get_para_as_digit(cnt++,&value) != ESP_AT_PARA_PARSE_RESULT_OK){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	at_adv_params.channel_map = value;
+	if(esp_at_get_para_as_digit(cnt++,&value) != ESP_AT_PARA_PARSE_RESULT_OK){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	at_adv_params.adv_filter_policy = value;
+	
+	return ESP_AT_RESULT_CODE_OK;
+}
+
+static uint8_t at_setupCmdBleAdvData(uint8_t para_num)
+{
+	int32_t cnt = 0 ,i = 0 ,j = 0;
+	char s[ADV_DATA_LEN*2];
+	
+	if(para_num != 1){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	
+	if(esp_at_get_para_as_str(cnt,(uint8_t **)(&s)) != ESP_AT_PARA_PARSE_RESULT_OK){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	while((s[i]!='\0')&&(s[i+1]!='\0'))
+	{
+		ble_adv_data[j] = ((s[i]-'0')<<4) + (s[i+1]-'0');
+		i += 2; 
+		j++;
+	}
+	
+	uint16_t sz = make_cmd_ble_set_adv_data(hci_cmd_buf,j,ble_adv_data);
+	esp_vhci_host_send_packet(hci_cmd_buf,sz);
+	
+	return ESP_AT_RESULT_CODE_OK;
+}
+
+static uint8_t at_exeCmdBleAdvStart(uint8_t *cmd_name)
+{
+	if(esp_ble_gap_start_advertising(&at_adv_params) != ESP_OK)
+		return ESP_AT_RESULT_CODE_FAIL;
+	return ESP_AT_RESULT_CODE_OK;
+}
+
+static uint8_t at_exeCmdBleAdvStop(uint8_t *cmd_name)
+{
+	if(esp_ble_gap_stop_advertising() != ESP_OK)
+		return ESP_AT_RESULT_CODE_FAIL;
+	return ESP_AT_RESULT_CODE_OK;
+}
+/*--------------------------------------------------------------------------------------------------------------------------------*/
 static esp_at_cmd_struct at_custom_cmd[] = {
     {"+UART", NULL, NULL, at_setupCmdUart, NULL},
     {"+UART_CUR", NULL, NULL, at_setupCmdUart, NULL},
     {"+UART_DEF", NULL, NULL, at_setupCmdUartDef, NULL},
     {"+CIUPDATE", NULL, NULL, NULL, at_exeCmdCipupdate},
 
-    /*add for try*/
-    {"+XWXTRY", NULL, NULL, NULL, at_exeCmdTRY},
-    /*----------------------------------------------------------------------------*/
+    /*add for ble at*/
     {"+BLEADDR",NULL,at_queryCmdBleAddr,at_setupCmdBleAddr,NULL},
     {"+BLEANAME",NULL,at_queryCmdBleName,at_setupCmdBleName,NULL},
     {"+BLEINIT",NULL,NULL,NULL,at_exeCmdBleInit},
 	
-	{"+BLEADVPARAM",NULL,NULL,NULL,NULL},
-    {"+BLEADVDATA",NULL,NULL,NULL,NULL},
-	{"+BLEADVSTART",NULL,NULL,NULL,NULL},
-	{"+BLEADVSTOP",NULL,NULL,NULL,NULL},
+	{"+BLEADVPARAM",NULL,at_queryCmdBleAdvParam,at_setupCmdBleAdvParam,NULL},
+    {"+BLEADVDATA",NULL,NULL,at_setupCmdBleAdvData,NULL},
+	{"+BLEADVSTART",NULL,NULL,NULL,at_exeCmdBleAdvStart},
+	{"+BLEADVSTOP",NULL,NULL,NULL,at_exeCmdBleAdvStop},
 	
 	
 };
