@@ -39,6 +39,7 @@
 #include "bt.h"
 #include "esp_bt_device.h"
 #include "esp_gap_ble_api.h"
+#include "esp_gattc_api.h"
 #include "esp_bt_defs.h"
 
 #if 0
@@ -70,6 +71,14 @@ static esp_ble_adv_params_t at_adv_params = {
 	.own_addr_type     =  BLE_ADDR_TYPE_PUBLIC ,
 	.channel_map       =  ADV_CHNL_ALL ,
 	.adv_filter_policy =  ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY ,
+};
+
+static esp_ble_scan_params_t at_scan_params = {
+    .scan_type              = BLE_SCAN_TYPE_ACTIVE,
+    .own_addr_type          = ESP_PUBLIC_ADDR,
+    .scan_filter_policy     = BLE_SCAN_FILTER_ALLOW_ALL,
+    .scan_interval          = 0x50,
+    .scan_window            = 0x30
 };
 
 enum {
@@ -629,6 +638,90 @@ static uint8_t at_exeCmdBleAdvStop(uint8_t *cmd_name)
 		return ESP_AT_RESULT_CODE_FAIL;
 	return ESP_AT_RESULT_CODE_OK;
 }
+
+static uint8_t at_setupCmdBLeSacnParam(uint8_t para_num)
+{
+	int32_t cnt = 0 , value = 0;
+	
+	if(para_num != 5){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	
+	if(esp_at_get_para_as_digit(cnt++,&value) != ESP_AT_PARA_PARSE_RESULT_OK){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	at_scan_params.scan_type = value;
+	if(esp_at_get_para_as_digit(cnt++,&value) != ESP_AT_PARA_PARSE_RESULT_OK){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	at_scan_params.own_addr_type = value;
+	if(esp_at_get_para_as_digit(cnt++,&value) != ESP_AT_PARA_PARSE_RESULT_OK){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	at_scan_params.scan_filter_policy = value;
+	if(esp_at_get_para_as_digit(cnt++,&value) != ESP_AT_PARA_PARSE_RESULT_OK){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	at_scan_params.scan_interval = value;
+	if(esp_at_get_para_as_digit(cnt++,&value) != ESP_AT_PARA_PARSE_RESULT_OK){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	at_scan_params.scan_window = value;
+	
+	return ESP_AT_RESULT_CODE_OK;
+}
+
+static uint8_t at_setupCmdBleScan(uint8_t para_num)
+{
+	int32_t cnt = 0 ;
+	char s[ADV_DATA_LEN] = "";
+	
+	if(para_num != 1){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	if(esp_at_get_para_as_str(cnt,(uint8_t **)(&s)) != ESP_AT_PARA_PARSE_RESULT_OK){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	if(strcmp(s,"true") == 0){
+		esp_ble_gap_start_scanning(0xffff);
+	}
+	else if(strcmp(s,"false") == 0){
+		esp_ble_gap_stop_scanning();
+	}
+	else
+		return ESP_AT_RESULT_CODE_FAIL;
+	return ESP_AT_RESULT_CODE_OK;
+}
+
+static uint8_t at_queryCmdBleConnParam(uint8_t *cmd_name)
+{
+	//TODO:	
+	return ESP_AT_RESULT_CODE_OK;
+}
+
+static uint8_t at_setupCmdBleConnParam(uint8_t param)
+{
+	//TODO:
+	return ESP_AT_RESULT_CODE_OK;
+}
+
+static uint8_t at_setupCmdBleConn(uint8_t param)
+{
+	//TODO:
+	return ESP_AT_RESULT_CODE_OK;
+}
+
+static uint8_t at_exeCmdBleDisConn(uint8_t *cmd_name)
+{
+	esp_gatt_if_t gattc_if = 0x0;
+	uint16_t conn_id = 0x0;
+	
+	//TODO:gattc_if & conn_id
+	if(esp_ble_gattc_close(gattc_if,conn_id) != ESP_OK)
+		return ESP_AT_RESULT_CODE_FAIL;
+	
+	return ESP_AT_RESULT_CODE_OK;
+}
 /*--------------------------------------------------------------------------------------------------------------------------------*/
 static esp_at_cmd_struct at_custom_cmd[] = {
     {"+UART", NULL, NULL, at_setupCmdUart, NULL},
@@ -646,7 +739,11 @@ static esp_at_cmd_struct at_custom_cmd[] = {
 	{"+BLEADVSTART",NULL,NULL,NULL,at_exeCmdBleAdvStart},
 	{"+BLEADVSTOP",NULL,NULL,NULL,at_exeCmdBleAdvStop},
 	
-	
+	{"+BLESCANOARAM",NULL,NULL,at_setupCmdBLeSacnParam,NULL},
+	{"+BLESCAN",NULL,NULL,at_setupCmdBleScan,NULL},
+	{"+BLECONNPARAM",NULL,at_queryCmdBleConnParam,at_setupCmdBleConnParam,NULL},
+	{"+BLECONN",NULL,NULL,at_setupCmdBleConn,NULL},
+	{"+BLEDISCONN",NULL,NULL,NULL,at_exeCmdBleDisConn},
 };
 
 void at_status_callback (esp_at_status_type status)
