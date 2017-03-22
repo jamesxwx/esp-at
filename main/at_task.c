@@ -41,15 +41,20 @@
 #include "esp_gap_ble_api.h"
 #include "esp_gattc_api.h"
 #include "esp_bt_defs.h"
+#include "esp_log.h"
 
 #if 0
     #ifndef CONFIG_AT_BASE_ON_UART
     #define CONFIG_AT_BASE_ON_UART
     #endif
 #endif
+#define GATTC_TAG "AT_GATTC_DEMO"
 
 #define BUFFER_DEPTH 50
 #define ADV_DATA_LEN 31
+#define PROFILE_NUM  1
+#define PROFILE_APP_ID 0
+#define ESP_GATT_IF_NONE 0xff
 #define HCI_H4_CMD_PREAMBLE_SIZE           (4)
 #define HCI_GRP_BLE_CMDS                   (0x08 << 10)
 
@@ -63,6 +68,8 @@
 static char ble_device_name[BUFFER_DEPTH] = "";
 static uint8_t ble_adv_data[ADV_DATA_LEN] = {};
 static uint8_t hci_cmd_buf[128];
+static bool connect = false;
+static uint16_t at_conn_id = 0x0;
 
 static esp_ble_adv_params_t at_adv_params = {
 	.adv_int_min       =  0x20 ,
@@ -81,11 +88,55 @@ static esp_ble_scan_params_t at_scan_params = {
     .scan_window            = 0x30
 };
 
+
+esp_bd_addr_t at_bda = {0} ;
+
+static esp_ble_conn_update_params_t at_conn_params={
+	{0,0,0,0,0,0},
+	.min_int = 10,
+	.max_int = 20,
+	.latency = 0x10,
+	.timeout = 0x30
+};
+
+struct at_ble_scan_rst{
+	esp_ble_gap_cb_param_t scan_rst;
+	struct at_ble_scan_rst * next;
+};
+
+typedef struct {
+	int32_t len;
+	struct at_ble_scan_rst * pfirst;
+	struct at_ble_scan_rst * plast;
+}scan_rst_head;
+
 enum {
     H4_TYPE_COMMAND = 1,
     H4_TYPE_ACL     = 2,
     H4_TYPE_SCO     = 3,
     H4_TYPE_EVENT   = 4
+};
+
+static scan_rst_head pScanRstHead = {
+	.len    = 0,
+	.pfirst = NULL,
+	.plast  = NULL
+};
+
+struct gattc_profile_inst {
+    esp_gattc_cb_t gattc_cb;
+    uint16_t gattc_if;
+    uint16_t app_id;
+    uint16_t conn_id;
+    esp_bd_addr_t remote_bda;
+};
+static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
+/* One gatt-based profile one app_id and one gattc_if, this array will store the gattc_if returned by ESP_GATTS_REG_EVT */
+static struct gattc_profile_inst gl_profile_tab[PROFILE_NUM] = {
+    [PROFILE_APP_ID] = {
+        .gattc_cb = gattc_profile_event_handler,
+        .gattc_if = ESP_GATT_IF_NONE,       /* Not get the gatt_if, so initial is ESP_GATT_IF_NONE */
+    },
 };
 /*-------------------------------------------------------------------------*/
 
@@ -414,36 +465,136 @@ static uint8_t at_exeCmdCipupdate(uint8_t *cmd_name)//add get station ip and ap 
     return ESP_AT_RESULT_CODE_ERROR;
 }
 /*--------------------------------------------------------------------------------------------------------------------------------*/
-/*
-static uint16_t make_cmd_ble_set_adv_enable (uint8_t *buf, uint8_t adv_enable)
+static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
 {
-    UINT8_TO_STREAM (buf, H4_TYPE_COMMAND);
-    UINT16_TO_STREAM (buf, HCI_BLE_WRITE_ADV_ENABLE);
-    UINT8_TO_STREAM  (buf, HCIC_PARAM_SIZE_WRITE_ADV_ENABLE);
-    UINT8_TO_STREAM (buf, adv_enable);
-    return HCI_H4_CMD_PREAMBLE_SIZE + HCIC_PARAM_SIZE_WRITE_ADV_ENABLE;
+    uint8_t *adv_name = NULL;
+    uint8_t adv_name_len = 0;
+	uint32_t index = 0;
+	struct at_ble_scan_rst * temp_p = NULL;
+	struct at_ble_scan_rst * p_temp_p = NULL;
+				
+    switch (event) {
+    case ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT: {
+        break;
+    }
+    case ESP_GAP_BLE_SCAN_START_COMPLETE_EVT:
+        break;
+    case ESP_GAP_BLE_SCAN_RESULT_EVT: {
+        esp_ble_gap_cb_param_t *scan_result = (esp_ble_gap_cb_param_t *)param;
+        switch (scan_result->scan_rst.search_evt) {
+        case ESP_GAP_SEARCH_INQ_RES_EVT:
+			temp_p = (struct at_ble_scan_rst *)malloc(sizeof(struct at_ble_scan_rst));
+			temp_p->next = NULL;
+			if(pScanRstHead.len == 0){
+				pScanRstHead.len++;
+				pScanRstHead.pfirst = temp_p;
+				pScanRstHead.plast = temp_p;
+				memcpy(&(temp_p->scan_rst),scan_result,sizeof(esp_ble_gap_cb_param_t));
+			}
+			else{
+				pScanRstHead.len++;
+				pScanRstHead.plast->next = temp_p;
+				pScanRstHead.plast = temp_p;
+			}
+			/*
+            if (adv_name != NULL) {
+                if (strcmp((char *)adv_name, device_name) == 0) {
+                    ESP_LOGI(GATTC_TAG, "Searched device %s\n", device_name);
+                    if (connect == false) {
+                        connect = true;
+                        ESP_LOGI(GATTC_TAG, "Connect to the remote device.\n");
+                        esp_ble_gap_stop_scanning();
+                        esp_ble_gattc_open(gl_profile_tab[PROFILE_A_APP_ID].gattc_if, scan_result->scan_rst.bda, true);
+                        esp_ble_gattc_open(gl_profile_tab[PROFILE_B_APP_ID].gattc_if, scan_result->scan_rst.bda, true);
+                    }
+                }
+            }
+			*/
+            break;
+        case ESP_GAP_SEARCH_INQ_CMPL_EVT:
+		    //TODO:
+		    index = 0 ;
+			p_temp_p = pScanRstHead.pfirst;
+			while( p_temp_p != NULL )
+			{
+				ESP_LOGI(GATTC_TAG, "Index = %d, RSSI = %d ,DeviceName = ", index ,p_temp_p->scan_rst.scan_rst.rssi);
+	            adv_name = esp_ble_resolve_adv_data(p_temp_p->scan_rst.scan_rst.ble_adv,ESP_BLE_AD_TYPE_NAME_CMPL, &adv_name_len);
+	            for (int j = 0; j < adv_name_len; j++) {
+	                printf("%c", adv_name[j]);
+				}
+				p_temp_p = p_temp_p->next;
+				index++;
+			}
+			printf("\r\n");
+            break;
+        default:
+            break;
+        }
+        break;
+    }
+    default:
+        break;
+    }
 }
 
-static uint16_t make_cmd_ble_set_adv_param (uint8_t *buf, uint16_t adv_int_min, uint16_t adv_int_max,
-        uint8_t adv_type, uint8_t addr_type_own,
-        uint8_t addr_type_dir, bd_addr_t direct_bda,
-        uint8_t channel_map, uint8_t adv_filter_policy)
+static void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param)
 {
-    UINT8_TO_STREAM (buf, H4_TYPE_COMMAND);
-    UINT16_TO_STREAM (buf, HCI_BLE_WRITE_ADV_PARAMS);
-    UINT8_TO_STREAM  (buf, HCIC_PARAM_SIZE_BLE_WRITE_ADV_PARAMS );
+    ESP_LOGI(GATTC_TAG, "EVT %d, gattc if %d\n", event, gattc_if);
 
-    UINT16_TO_STREAM (buf, adv_int_min);
-    UINT16_TO_STREAM (buf, adv_int_max);
-    UINT8_TO_STREAM (buf, adv_type);
-    UINT8_TO_STREAM (buf, addr_type_own);
-    UINT8_TO_STREAM (buf, addr_type_dir);
-    BDADDR_TO_STREAM (buf, direct_bda);
-    UINT8_TO_STREAM (buf, channel_map);
-    UINT8_TO_STREAM (buf, adv_filter_policy);
-    return HCI_H4_CMD_PREAMBLE_SIZE + HCIC_PARAM_SIZE_BLE_WRITE_ADV_PARAMS;
+    /* If event is register event, store the gattc_if for each profile */
+    if (event == ESP_GATTC_REG_EVT) {
+        if (param->reg.status == ESP_GATT_OK) {
+            gl_profile_tab[param->reg.app_id].gattc_if = gattc_if;
+        } else {
+            ESP_LOGI(GATTC_TAG, "Reg app failed, app_id %04x, status %d\n",
+                    param->reg.app_id, 
+                    param->reg.status);
+            return;
+        }
+    }
+
+    /* If the gattc_if equal to profile A, call profile A cb handler,
+     * so here call each profile's callback */
+    do {
+        int idx;
+        for (idx = 0; idx < PROFILE_NUM; idx++) {
+            if (gattc_if == ESP_GATT_IF_NONE || /* ESP_GATT_IF_NONE, not specify a certain gatt_if, need to call every profile cb function */
+                    gattc_if == gl_profile_tab[idx].gattc_if) {
+                if (gl_profile_tab[idx].gattc_cb) {
+                    gl_profile_tab[idx].gattc_cb(event, gattc_if, param);
+                }
+            }
+        }
+    } while (0);
 }
-*/
+
+static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param)
+{
+    esp_ble_gattc_cb_param_t *p_data = (esp_ble_gattc_cb_param_t *)param;
+
+    switch (event) {
+    case ESP_GATTC_REG_EVT:
+        break;
+    case ESP_GATTC_OPEN_EVT:
+        at_conn_id = p_data->open.conn_id;
+        break;
+    case ESP_GATTC_SEARCH_RES_EVT: 
+        break;
+    case ESP_GATTC_SEARCH_CMPL_EVT:
+        break;
+    case ESP_GATTC_GET_CHAR_EVT:
+        break;
+    case ESP_GATTC_REG_FOR_NOTIFY_EVT: 
+	    break;
+    case ESP_GATTC_NOTIFY_EVT:
+        break;
+    case ESP_GATTC_WRITE_DESCR_EVT:
+        break;
+    default:
+        break;
+    }
+}
+
 static uint16_t make_cmd_ble_set_adv_data(uint8_t *buf, uint8_t data_len, uint8_t *p_data)
 {
     UINT8_TO_STREAM (buf, H4_TYPE_COMMAND);
@@ -639,6 +790,27 @@ static uint8_t at_exeCmdBleAdvStop(uint8_t *cmd_name)
 	return ESP_AT_RESULT_CODE_OK;
 }
 
+static uint8_t at_exeCmdBleClientAppReg(uint8_t *cmd_name)
+{
+    esp_err_t status;
+
+    ESP_LOGI(GATTC_TAG, "register callback\n");
+
+    //register the scan callback function to the gap moudule
+    if ((status = esp_ble_gap_register_callback(esp_gap_cb)) != ESP_OK) {
+        ESP_LOGE(GATTC_TAG, "gap register error, error code = %x\n", status);
+        return ESP_AT_RESULT_CODE_ERROR;
+    }
+
+    //register the callback function to the gattc module
+    if ((status = esp_ble_gattc_register_callback(esp_gattc_cb)) != ESP_OK) {
+        ESP_LOGE(GATTC_TAG, "gattc register error, error code = %x\n", status);
+        return ESP_AT_RESULT_CODE_ERROR;
+    }
+	
+	return ESP_AT_RESULT_CODE_OK;
+}
+
 static uint8_t at_setupCmdBLeSacnParam(uint8_t para_num)
 {
 	int32_t cnt = 0 , value = 0;
@@ -683,7 +855,7 @@ static uint8_t at_setupCmdBleScan(uint8_t para_num)
 		return ESP_AT_RESULT_CODE_ERROR;
 	}
 	if(strcmp(s,"true") == 0){
-		esp_ble_gap_start_scanning(0xffff);
+		esp_ble_gap_start_scanning(0x5);
 	}
 	else if(strcmp(s,"false") == 0){
 		esp_ble_gap_stop_scanning();
@@ -699,30 +871,72 @@ static uint8_t at_queryCmdBleConnParam(uint8_t *cmd_name)
 	return ESP_AT_RESULT_CODE_OK;
 }
 
-static uint8_t at_setupCmdBleConnParam(uint8_t param)
+static uint8_t at_setupCmdBleConnParam(uint8_t para_num)
 {
-	//TODO:
+	int32_t cnt = 0 , value = 0;
+	
+	if(para_num != 4){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	
+	if(esp_at_get_para_as_digit(cnt++,&value) != ESP_AT_PARA_PARSE_RESULT_OK){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	at_conn_params.min_int = value;
+	if(esp_at_get_para_as_digit(cnt++,&value) != ESP_AT_PARA_PARSE_RESULT_OK){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	at_conn_params.max_int = value;
+	if(esp_at_get_para_as_digit(cnt++,&value) != ESP_AT_PARA_PARSE_RESULT_OK){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	at_conn_params.latency = value;
+	if(esp_at_get_para_as_digit(cnt++,&value) != ESP_AT_PARA_PARSE_RESULT_OK){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	at_conn_params.timeout = value;
+	
+	esp_ble_gap_update_conn_params(&at_conn_params);
+	
 	return ESP_AT_RESULT_CODE_OK;
 }
 
-static uint8_t at_setupCmdBleConn(uint8_t param)
+static uint8_t at_setupCmdBleConn(uint8_t para_num)
 {
-	//TODO:
+	int32_t cnt = 0 , value = 0 , i = 0;
+	struct at_ble_scan_rst * temp_p = NULL;
+	
+	if(para_num != 1){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	if(esp_at_get_para_as_digit(cnt,&value) != ESP_AT_PARA_PARSE_RESULT_OK){
+		return ESP_AT_RESULT_CODE_ERROR;
+	}
+	temp_p = pScanRstHead.pfirst;
+	for( i=1 ; i <= value ; i++ ){
+		temp_p = temp_p->next;
+	}
+	
+	if(connect == false){
+		connect = true;
+		for(i=0;i<6;i++){
+			at_conn_params.bda[i] = temp_p->scan_rst.scan_rst.bda[i];
+		}
+		esp_ble_gap_stop_scanning();
+		esp_ble_gattc_open(gl_profile_tab[PROFILE_APP_ID].gattc_if,temp_p->scan_rst.scan_rst.bda,true);
+	}
 	return ESP_AT_RESULT_CODE_OK;
 }
 
 static uint8_t at_exeCmdBleDisConn(uint8_t *cmd_name)
 {
-	esp_gatt_if_t gattc_if = 0x0;
-	uint16_t conn_id = 0x0;
 	
-	//TODO:gattc_if & conn_id
-	if(esp_ble_gattc_close(gattc_if,conn_id) != ESP_OK)
+	if(esp_ble_gattc_close(gl_profile_tab[PROFILE_APP_ID].gattc_if,at_conn_id) != ESP_OK)
 		return ESP_AT_RESULT_CODE_FAIL;
 	
 	return ESP_AT_RESULT_CODE_OK;
 }
-/*--------------------------------------------------------------------------------------------------------------------------------*/
+/*-----------------------------------------------------another-sight-----------------------------------------------------------------------*/
 static esp_at_cmd_struct at_custom_cmd[] = {
     {"+UART", NULL, NULL, at_setupCmdUart, NULL},
     {"+UART_CUR", NULL, NULL, at_setupCmdUart, NULL},
@@ -739,11 +953,14 @@ static esp_at_cmd_struct at_custom_cmd[] = {
 	{"+BLEADVSTART",NULL,NULL,NULL,at_exeCmdBleAdvStart},
 	{"+BLEADVSTOP",NULL,NULL,NULL,at_exeCmdBleAdvStop},
 	
+	{"+BLECLIENTAPPREG",NULL,NULL,NULL,at_exeCmdBleClientAppReg},
+	
 	{"+BLESCANOARAM",NULL,NULL,at_setupCmdBLeSacnParam,NULL},
 	{"+BLESCAN",NULL,NULL,at_setupCmdBleScan,NULL},
 	{"+BLECONNPARAM",NULL,at_queryCmdBleConnParam,at_setupCmdBleConnParam,NULL},
 	{"+BLECONN",NULL,NULL,at_setupCmdBleConn,NULL},
 	{"+BLEDISCONN",NULL,NULL,NULL,at_exeCmdBleDisConn},
+	
 };
 
 void at_status_callback (esp_at_status_type status)
